@@ -5,7 +5,7 @@ import hatsSrc from "@/assets/atelier/hats.png";
 import capesSrc from "@/assets/atelier/capes.png";
 
 export interface FrameBox { top: number; bottom: number; cx: number; headW: number; headH: number; empty: boolean }
-export interface Recolor { skin?: string; hair?: string; eyes?: string; body?: string; legs?: string }
+export interface Recolor { skin?: string | undefined; hair?: string | undefined; eyes?: string | undefined; body?: string | undefined; legs?: string | undefined }
 
 type Img = HTMLImageElement | HTMLCanvasElement;
 const ready = (i: Img | null | undefined): i is Img => !!i && (i instanceof HTMLCanvasElement || (i.complete && i.naturalWidth > 0));

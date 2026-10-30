@@ -1369,8 +1369,8 @@ export class Game {
       const w = this.weapon();
       const look = resolveLook(getLook(), armor.color, ring);
       const L = getLook();
-      if (!drawHero(c, p.x, p.y, { skin: L.kskin, dir: p.dir, moving: Math.hypot(p.vx, p.vy) > 10, frameT: p.frameT, attack: Math.max(0, p.attackT), weapon: w, time: this.clock, pal: look.pal, extras: look.extras }))
-        drawChar(c, p.x, p.y, look.pal, p.dir, p.frame, { kind: w.weapon ?? "sword", color: w.color }, Math.max(0, p.attackT), look.extras);
+      if (!drawHero(c, p.x, p.y, { skin: L.kskin, dir: p.dir, moving: Math.hypot(p.vx, p.vy) > 10, frameT: p.frameT, attack: Math.max(0, p.attackT), weapon: w, time: this.clock, custom: heroCustom(L) }))
+        drawHeroClassic(c, p.x, p.y, look.pal, p.dir, p.frame, { kind: w.weapon ?? "sword", color: w.color }, Math.max(0, p.attackT), look.extras, this.clock);
       drawAttackFx(c, p.x, p.y, p.dir, Math.max(0, p.attackT), w.weapon ?? "sword", w.color, this.clock);
     } });
     drawPets(this, c, draws, wt);

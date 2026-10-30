@@ -6,7 +6,7 @@ import { drawK, kImage, K_DIR, K_SHEETS } from "./kaetram";
 import { drawChar, type CharExtras } from "./gfx";
 import { analyzeSheet, drawAccessory, preloadAccessories, recolorSheet, viewOf, type FrameBox, type Recolor } from "./hero-look";
 
-export interface HeroSkin { id: string; name: string; desc: string; sheet: string; minLevel: number; faceLeft?: boolean }
+export interface HeroSkin { id: string; name: string; desc: string; sheet: string; minLevel: number; faceLeft?: boolean | undefined }
 /** Skins geradas por IA: folhas 5×8 de 48 px (linhas 0-2 andar frente/lado/costas, 3 ataque de lado). */
 const GEN: [string, string, string, number, boolean?][] = [
   ["hero", "Herói Ilustrado", "O aventureiro clássico, redesenhado.", 1],
@@ -69,7 +69,7 @@ function genImage(id: string): HTMLImageElement | null {
 }
 
 /** Escolhas do jogador que entram no próprio sprite. */
-export interface HeroCustom { recolor: Recolor; hat: number; cape?: string }
+export interface HeroCustom { recolor: Recolor; hat: number; cape?: string | undefined }
 
 interface FrameRef { img: HTMLImageElement; key: string; fw: number; fh: number; col: number; row: number; ou: number; ov: number; flip: boolean; faceRight: boolean }
 
@@ -115,7 +115,7 @@ export function drawHero(c: CanvasRenderingContext2D, x: number, y: number, o: {
   const kae = !skin.sheet.startsWith("gen:");
   const anim = o.attack > 0 ? `${bow ? "bow_" : ""}atk_${K_DIR[o.dir] ?? "down"}` : o.moving ? `walk_${K_DIR[o.dir] ?? "down"}` : `idle_${K_DIR[o.dir] ?? "down"}`;
   const wsheet = kae && o.weapon ? weaponSheet(o.weapon) : null;
-  if (wsheet && o.dir === 3) drawK(c, wsheet, anim, f.col, x, y, o.dir === 1, a, sc);
+  if (wsheet && o.dir === 3) drawK(c, wsheet, anim, f.col, x, y, false, a, sc);
   c.save();
   if (a < 1) c.globalAlpha *= a;
   c.translate(Math.round(x), Math.round(y)); c.scale(f.flip ? -sc : sc, sc); c.translate(-f.ou, -f.ov);
