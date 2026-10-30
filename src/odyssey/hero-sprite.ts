@@ -1,10 +1,42 @@
-// Protagonista com os sprites do primeiro jogo: corpo base, skins prontas e arma equipada em camadas.
+// Protagonista com sprites prontos (Kaetram e skins geradas por IA) + o herói em pixels.
+// A personalização entra no próprio sprite: cores repintadas por quadro e chapéu/capa encaixados
+// por direção e passo (ver hero-look.ts).
 import type { ItemDef, Palette, WeaponKind } from "./data";
-import { drawK, kImage, K_DIR } from "./kaetram";
-import type { CharExtras } from "./gfx";
+import { drawK, kImage, K_DIR, K_SHEETS } from "./kaetram";
+import { drawChar, type CharExtras } from "./gfx";
+import { analyzeSheet, drawAccessory, preloadAccessories, recolorSheet, viewOf, type FrameBox, type Recolor } from "./hero-look";
 
-export interface HeroSkin { id: string; name: string; desc: string; sheet: string; minLevel: number }
-/** Índice salvo em Look.kskin. O último item volta ao herói desenhado em pixels (personalizável). */
+export interface HeroSkin { id: string; name: string; desc: string; sheet: string; minLevel: number; faceLeft?: boolean }
+/** Skins geradas por IA: folhas 5×8 de 48 px (linhas 0-2 andar frente/lado/costas, 3 ataque de lado). */
+const GEN: [string, string, string, number, boolean?][] = [
+  ["hero", "Herói Ilustrado", "O aventureiro clássico, redesenhado.", 1],
+  ["knight", "Cavaleiro", "Armadura polida e capa azul.", 2],
+  ["archer", "Arqueira da Mata", "Capuz verde e passos leves.", 2],
+  ["cat", "Gato Espadachim", "Pequeno, laranja e corajoso.", 1],
+  ["mage", "Mago Azul", "Chapéu estrelado e cajado.", 3],
+  ["witch", "Bruxa do Pântano", "Vassoura e risada abafada.", 4],
+  ["druid", "Druida", "Fala com as árvores.", 4],
+  ["pirate", "Pirata", "Tricórnio e sabre curvo.", 5],
+  ["ninja", "Ninja", "Cachecol rubro, sombra rápida.", 6],
+  ["samurai", "Samurai", "Honra e lâmina afiada.", 6],
+  ["taekwondo", "Lutadora", "Faixa vermelha e chutes velozes.", 5],
+  ["viking", "Viking", "Chifres, barba e machado.", 7],
+  ["princess", "Princesa", "Coroa de rubis e lâmina fina.", 7, true],
+  ["paladin", "Paladino Dourado", "Martelo sagrado e escudo.", 8],
+  ["oldman", "Velho Mago", "Barba longa e olhar sábio.", 8, true],
+  ["danbo", "Caixa Andante", "Papelão com coração.", 3],
+  ["pumpkin", "Abóbora", "Cabeça de abóbora e foice.", 9],
+  ["skeleton", "Esqueleto", "Ossos que rangem.", 9],
+  ["wolf", "Lobisomem", "Uivo prateado.", 10],
+  ["sea", "Tritão", "Escamas azuis e tridente.", 10],
+  ["ice", "Golem de Gelo", "Feito do inverno eterno.", 11],
+  ["mecha", "Mecha", "Lâmina de energia.", 12],
+  ["vampire", "Vampiro", "Capa negra e caninos.", 12],
+  ["necro", "Ceifador", "Foice e silêncio.", 13],
+  ["demon", "Demônio", "Chamas e chifres.", 14],
+  ["angel", "Anjo", "Asas brancas e luz.", 15],
+];
+/** Índice salvo em Look.kskin. Os 10 primeiros nunca mudam de posição (saves antigos). */
 export const HERO_SKINS: HeroSkin[] = [
   { id: "base", name: "Aventureiro", desc: "O herói clássico do primeiro jogo.", sheet: "player/base", minLevel: 1 },
   { id: "danbo", name: "Danbo", desc: "Robô de papelão, firme e leal.", sheet: "player/skin/danbo", minLevel: 1 },
@@ -16,8 +48,9 @@ export const HERO_SKINS: HeroSkin[] = [
   { id: "skeleton", name: "Esqueleto", desc: "Voltou do Abismo e esqueceu de morrer.", sheet: "player/skin/skeletonskin", minLevel: 10 },
   { id: "darkskeleton", name: "Esqueleto Sombrio", desc: "Ossos tingidos pela Noite.", sheet: "player/skin/darkskeletonskin", minLevel: 15 },
   { id: "classic", name: "Herói em pixels", desc: "O visual personalizável original (pele, cabelo, roupa…).", sheet: "", minLevel: 1 },
+  ...GEN.map(([id, name, desc, minLevel, faceLeft]) => ({ id: `gen-${id}`, name, desc, sheet: `gen:${id}`, minLevel, faceLeft })),
 ];
-export const CLASSIC_SKIN = HERO_SKINS.length - 1;
+export const CLASSIC_SKIN = 9;
 export const skinUnlocked = (i: number, level: number) => level >= (HERO_SKINS[i]?.minLevel ?? 1);
 
 /** Folha de arma para cada tipo quando o item não tiver uma própria. */
@@ -27,39 +60,83 @@ export function weaponSheet(item: Pick<ItemDef, "sprite" | "weapon"> | undefined
   return `player/weapon/${s}`;
 }
 
+const genCache = new Map<string, HTMLImageElement>();
+function genImage(id: string): HTMLImageElement | null {
+  if (typeof Image === "undefined") return null;
+  let img = genCache.get(id);
+  if (!img) { img = new Image(); img.src = `/hero/${id}.png`; genCache.set(id, img); }
+  return img.complete && img.naturalWidth ? img : null;
+}
+
+/** Escolhas do jogador que entram no próprio sprite. */
+export interface HeroCustom { recolor: Recolor; hat: number; cape?: string }
+
+interface FrameRef { img: HTMLImageElement; key: string; fw: number; fh: number; col: number; row: number; ou: number; ov: number; flip: boolean; faceRight: boolean }
+
+/** Resolve qual quadro desenhar para cada skin, direção e passo. */
+function frameFor(skin: HeroSkin, dir: number, moving: boolean, frameT: number, attack: number, time: number, bow: boolean): FrameRef | null {
+  const d = K_DIR[dir] ?? "down", flip = dir === 1;
+  if (skin.sheet.startsWith("gen:")) {
+    const id = skin.sheet.slice(4), img = genImage(id); if (!img) return null;
+    const side = dir === 1 || dir === 2;
+    // A folha de lado olha para a direita (ou esquerda nas skins marcadas); espelha para a outra direção.
+    const natRight = !skin.faceLeft, wantRight = dir === 2;
+    let row = dir === 0 ? 0 : dir === 3 ? 2 : 1, col: number;
+    if (attack > 0 && side) { row = 3; col = Math.min(4, Math.floor((1 - attack) * 5)); }
+    else if (moving || attack > 0) col = 1 + (Math.floor(frameT) % 4);
+    else col = Math.floor(time * 1.2) % 2 ? 0 : 0;
+    return { img, key: skin.sheet, fw: 48, fh: 48, col, row, ou: 24, ov: 44, flip: side && natRight !== wantRight, faceRight: natRight };
+  }
+  const def = K_SHEETS[skin.sheet]; const img = kImage(skin.sheet); if (!def?.anims || !img) return null;
+  const anim = attack > 0 ? `${bow ? "bow_" : ""}atk_${d}` : moving ? `walk_${d}` : `idle_${d}`;
+  const a = def.anims[anim] ?? def.anims[anim.replace("bow_", "")] ?? def.anims["idle_down"]!;
+  const fr = attack > 0 ? Math.min(3, Math.floor((1 - attack) * 4)) : moving ? frameT : time * 2.2;
+  const col = ((Math.floor(fr) % a[0]) + a[0]) % a[0];
+  const w = def.w ?? 32, h = def.h ?? 32;
+  return { img, key: skin.sheet, fw: w, fh: h, col, row: a[1], ou: 8 - (def.ox ?? -16), ov: 32 - (def.oy ?? -16), flip, faceRight: true };
+}
+
 /**
- * Desenha o herói com sprites Kaetram. Retorna false quando a skin é a clássica
- * ou as imagens ainda não carregaram (o jogo então usa drawChar).
+ * Desenha o herói com sprites prontos. Retorna false quando a skin é a clássica
+ * ou as imagens ainda não carregaram (quem chama usa drawHeroClassic).
  */
-export function drawHero(c: CanvasRenderingContext2D, x: number, y: number, o: { skin: number; dir: number; moving: boolean; frameT: number; attack: number; weapon?: Pick<ItemDef, "sprite" | "weapon"> | null; time: number; alpha?: number; scale?: number; pal?: Palette; extras?: CharExtras }): boolean {
-  const skin = HERO_SKINS[o.skin] ?? HERO_SKINS[0];
-  if (!skin.sheet || !kImage(skin.sheet)) return false;
-  const d = K_DIR[o.dir] ?? "down", flip = o.dir === 1;
+export function drawHero(c: CanvasRenderingContext2D, x: number, y: number, o: { skin: number; dir: number; moving: boolean; frameT: number; attack: number; weapon?: Pick<ItemDef, "sprite" | "weapon"> | null; time: number; alpha?: number; scale?: number; custom?: HeroCustom }): boolean {
+  const skin = HERO_SKINS[o.skin] ?? HERO_SKINS[0]!;
+  if (!skin.sheet) return false;
+  preloadAccessories();
   const bow = o.weapon?.weapon === "bow";
-  const attacking = o.attack > 0;
-  const anim = attacking ? `${bow ? "bow_" : ""}atk_${d}` : o.moving ? `walk_${d}` : `idle_${d}`;
-  const frame = attacking ? Math.min(3, Math.floor((1 - o.attack) * 4)) : o.moving ? o.frameT : o.time * 2.2;
-  const wsheet = o.weapon ? weaponSheet(o.weapon) : null;
+  const f = frameFor(skin, o.dir, o.moving, o.frameT, o.attack, o.time, bow); if (!f) return false;
   const sc = o.scale ?? 1, a = o.alpha ?? 1;
-  if (wsheet && d === "up") drawK(c, wsheet, anim, frame, x, y, flip, a, sc);
-  drawK(c, skin.sheet, anim, frame, x, y, flip, a, sc);
-  if (wsheet && d !== "up") drawK(c, wsheet, anim, frame, x, y, flip, a, sc);
-  drawCustomization(c, x, y, d, o.pal, o.extras, o.time, sc, a);
+  const cu = o.custom;
+  const src = cu ? recolorSheet(f.img, f.key, f.fw, f.fh, cu.recolor) : f.img;
+  const box: FrameBox | undefined = cu && (cu.hat || cu.cape) ? analyzeSheet(f.img, f.key, f.fw, f.fh)?.[f.row]?.[f.col] : undefined;
+  const view = viewOf(o.dir), sway = Math.sin(o.time * 4 + o.frameT);
+  // Arma Kaetram por baixo quando de costas (as skins geradas já trazem a própria arma).
+  const kae = !skin.sheet.startsWith("gen:");
+  const anim = o.attack > 0 ? `${bow ? "bow_" : ""}atk_${K_DIR[o.dir] ?? "down"}` : o.moving ? `walk_${K_DIR[o.dir] ?? "down"}` : `idle_${K_DIR[o.dir] ?? "down"}`;
+  const wsheet = kae && o.weapon ? weaponSheet(o.weapon) : null;
+  if (wsheet && o.dir === 3) drawK(c, wsheet, anim, f.col, x, y, o.dir === 1, a, sc);
+  c.save();
+  if (a < 1) c.globalAlpha *= a;
+  c.translate(Math.round(x), Math.round(y)); c.scale(f.flip ? -sc : sc, sc); c.translate(-f.ou, -f.ov);
+  if (box) drawAccessory(c, "back", box, view, f.faceRight, cu!.hat, cu!.cape, sway);
+  c.drawImage(src, f.col * f.fw, f.row * f.fh, f.fw, f.fh, 0, 0, f.fw, f.fh);
+  if (box) { drawAccessory(c, "front", box, view, f.faceRight, cu!.hat, cu!.cape, sway); drawAccessory(c, "hat", box, view, f.faceRight, cu!.hat, cu!.cape, sway); }
+  c.restore();
+  if (wsheet && o.dir !== 3) drawK(c, wsheet, anim, f.col, x, y, o.dir === 1, a, sc);
   return true;
 }
 
-function drawCustomization(c: CanvasRenderingContext2D, x: number, y: number, dir: string, pal: Palette | undefined, ex: CharExtras | undefined, time: number, sc: number, alpha: number) {
-  if (!pal && !ex) return;
-  c.save(); c.globalAlpha = alpha; c.translate(Math.round(x), Math.round(y)); c.scale(sc, sc);
-  const face = pal?.skin ?? "#f0c8a0", hair = pal?.hair ?? "#f0d040", eye = ex?.eyes ?? "#202030";
-  // Tint suave: preserva os pixels da skin Kaetram e aplica a escolha do jogador.
-  c.globalCompositeOperation = "multiply"; c.globalAlpha = alpha * .2; c.fillStyle = face; c.fillRect(-4, -16, 8, 7); c.globalCompositeOperation = "source-over";
-  c.globalAlpha = alpha * .7;
-  if (ex?.cape) { c.fillStyle = ex.cape; c.beginPath(); c.moveTo(-7, -9); c.quadraticCurveTo(-11, -3 + Math.sin(time * 4) * 1.4, -6, 0); c.lineTo(3, -1); c.lineTo(4, -10); c.closePath(); c.fill(); }
-  c.fillStyle = hair; c.fillRect(-4, -18, 8, 2); if (ex?.hairStyle === 1) c.fillRect(-6, -14, 2, 6); if (ex?.hairStyle === 2) { c.fillRect(-5, -20, 2, 2); c.fillRect(3, -20, 2, 2); }
-  if (dir === "down" || dir === "left" || dir === "right") { c.fillStyle = eye; c.fillRect(dir === "left" ? -4 : 2, -14, 1.5, 2); c.fillRect(dir === "right" ? 2 : -4, -14, 1.5, 2); }
-  if (ex?.mark === 1) { c.fillStyle = "#d84b55"; c.fillRect(dir === "left" ? -2 : 2, -12, 1, 4); }
-  if (ex?.mark === 2) { c.fillStyle = "#a05a30"; c.fillRect(-3, -11, 1, 1); c.fillRect(2, -11, 1, 1); }
-  if (ex?.hat && ex.hatColor) { c.fillStyle = ex.hatColor; c.fillRect(-6, -19, 12, 2); c.fillRect(-3, -22, 6, 3); if (ex.hat === 2) c.fillRect(-1, -25, 2, 3); }
-  c.restore();
+/** Herói em pixels com chapéu e capa gerados por IA encaixados na cabeça desenhada por drawChar. */
+export function drawHeroClassic(c: CanvasRenderingContext2D, x: number, y: number, pal: Palette, dir: number, frame: number, weapon: { kind: WeaponKind; color: string } | null, attack: number, ex: CharExtras, time: number) {
+  preloadAccessories();
+  const step = frame % 4 === 1 ? 1 : frame % 4 === 3 ? -1 : 0;
+  const top = Math.round(y - 18) + 1 + (step ? 0 : 0);
+  const box: FrameBox = { top, bottom: Math.round(y) - 1, cx: Math.round(x), headW: 10, headH: 8, empty: false };
+  const view = viewOf(dir), faceRight = dir !== 1, sway = Math.sin(time * 4 + frame);
+  const hat = ex.hat ?? 0, cape = ex.cape;
+  drawAccessory(c, "back", box, view, faceRight, hat, cape, sway);
+  drawChar(c, x, y, pal, dir, frame, weapon, attack, { ...ex, hat: 0, hatColor: "", cape: undefined });
+  drawAccessory(c, "front", box, view, faceRight, hat, cape, sway);
+  drawAccessory(c, "hat", box, view, faceRight, hat, cape, sway);
 }
