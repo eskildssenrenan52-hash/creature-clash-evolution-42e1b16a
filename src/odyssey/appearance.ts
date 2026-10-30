@@ -2,13 +2,17 @@
 // Tudo é dado puro + um salvamento próprio ("golden-arrow-look"), então os saves antigos não são tocados.
 import type { Palette } from "./data";
 import type { CharExtras } from "./gfx";
+import { HERO_SKINS, type HeroCustom } from "./hero-sprite";
 
 export interface Look {
   skin: number; hairStyle: number; hairColor: number; eyes: number;
   outfit: number; cape: number; hat: number; mark: number;
   /** Skin com sprite do primeiro jogo (ver hero-sprite.ts). */
   kskin: number;
+  /** Nas skins prontas, quais cores ficam as originais: 1 pele, 2 cabelo, 4 olhos. */
+  keep: number;
 }
+export const KEEP = { skin: 1, hairColor: 2, eyes: 4 } as const;
 export interface Swatch { name: string; color: string }
 export interface Outfit { name: string; body: string; legs: string; accent?: string; minLevel?: number }
 export interface HatDef { name: string; color: string; minLevel?: number }
@@ -51,7 +55,7 @@ export const HATS: HatDef[] = [
 ];
 export const MARKS = ["Nenhuma", "Cicatriz", "Sardas", "Pintura de guerra", "Óculos"];
 
-export const DEFAULT_LOOK: Look = { skin: 1, hairStyle: 0, hairColor: 0, eyes: 0, outfit: 0, cape: 0, hat: 0, mark: 0, kskin: 0 };
+export const DEFAULT_LOOK: Look = { skin: 1, hairStyle: 0, hairColor: 0, eyes: 0, outfit: 0, cape: 0, hat: 0, mark: 0, kskin: 0, keep: 7 };
 
 const L = (o: Partial<Look>): Look => ({ ...DEFAULT_LOOK, ...o });
 export const SKIN_PRESETS: SkinPreset[] = [
@@ -70,7 +74,8 @@ export function sanitizeLook(raw: Partial<Look> | null | undefined): Look {
   return {
     skin: raw ? clamp(r.skin, SKIN_TONES.length) : DEFAULT_LOOK.skin, hairStyle: clamp(r.hairStyle, HAIR_STYLES.length),
     hairColor: clamp(r.hairColor, HAIR_COLORS.length), eyes: clamp(r.eyes, EYE_COLORS.length),
-    outfit: clamp(r.outfit, OUTFITS.length), cape: clamp(r.cape, CAPES.length), hat: clamp(r.hat, HATS.length), mark: clamp(r.mark, MARKS.length), kskin: clamp(r.kskin, 10),
+    outfit: clamp(r.outfit, OUTFITS.length), cape: clamp(r.cape, CAPES.length), hat: clamp(r.hat, HATS.length), mark: clamp(r.mark, MARKS.length), kskin: clamp(r.kskin, HERO_SKINS.length),
+    keep: r.keep === undefined ? 7 : clamp(r.keep, 8),
   };
 }
 
@@ -96,7 +101,7 @@ export function randomLook(level: number, rnd: () => number = Math.random): Look
   const okOutfits = OUTFITS.map((_, i) => i).filter((i) => outfitUnlocked(i, level));
   const okHats = HATS.map((_, i) => i).filter((i) => hatUnlocked(i, level));
   return { skin: pick(SKIN_TONES.length), hairStyle: pick(HAIR_STYLES.length), hairColor: pick(HAIR_COLORS.length), eyes: pick(EYE_COLORS.length),
-    outfit: okOutfits[pick(okOutfits.length)] ?? 0, cape: pick(CAPES.length), hat: okHats[pick(okHats.length)] ?? 0, mark: pick(MARKS.length), kskin: 9 };
+    outfit: okOutfits[pick(okOutfits.length)] ?? 0, cape: pick(CAPES.length), hat: okHats[pick(okHats.length)] ?? 0, mark: pick(MARKS.length), kskin: 9, keep: 0 };
 }
 
 const memo = new Map<string, { pal: Palette; extras: CharExtras }>();
@@ -109,4 +114,18 @@ export function resolveLook(look: Look, armorColor: string, ring: string): { pal
   const extras: CharExtras = { hairStyle: look.hairStyle, eyes: EYE_COLORS[look.eyes].color, cape: CAPES[look.cape].color || undefined, hat: look.hat, hatColor: HATS[look.hat]?.color ?? "", mark: look.mark };
   if (memo.size > 200) memo.clear();
   const v = { pal, extras }; memo.set(k, v); return v;
+}
+
+/** Escolhas que entram no próprio sprite das skins prontas (sem filtros por cima). */
+export function heroCustom(look: Look): HeroCustom {
+  const o = OUTFITS[look.outfit];
+  return {
+    recolor: {
+      skin: look.keep & KEEP.skin ? undefined : SKIN_TONES[look.skin]?.color,
+      hair: look.keep & KEEP.hairColor ? undefined : HAIR_COLORS[look.hairColor]?.color,
+      eyes: look.keep & KEEP.eyes ? undefined : EYE_COLORS[look.eyes]?.color,
+      body: look.outfit > 0 ? o?.body : undefined, legs: look.outfit > 0 ? o?.legs : undefined,
+    },
+    hat: look.hat, cape: CAPES[look.cape]?.color || undefined,
+  };
 }
