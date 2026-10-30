@@ -72,7 +72,7 @@ function rgb(h: number, s: number, l: number): [number, number, number] {
 const hex = (c: string): [number, number, number] => { const n = parseInt(c.replace("#", "").slice(0, 6), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 const skinLike = (h: number, s: number, l: number) => h >= 6 && h <= 45 && s >= .18 && s <= .85 && l >= .42 && l <= .9;
 
-const enum Cls { None, Skin, Hair, Eye, Body, Legs }
+const Cls = { None: 0, Skin: 1, Hair: 2, Eye: 3, Body: 4, Legs: 5 } as const;
 
 /** Cópia da folha com pele, cabelo, olhos e roupa repintados quadro a quadro. */
 const recolorCache = new Map<string, HTMLCanvasElement>();
@@ -95,7 +95,7 @@ export function recolorSheet(img: Img, key: string, fw: number, fh: number, rc: 
       if (!op(i)) continue;
       const [h, s, l] = hsl(d[i * 4]!, d[i * 4 + 1]!, d[i * 4 + 2]!);
       const nearHead = Math.abs(u - b.cx) <= b.headW * .7;
-      let c = Cls.None;
+      let c: number = Cls.None;
       if (v < headEnd && nearHead) {
         const inner = u > 0 && u < fw - 1 && op(i - 1) && op(i + 1) && op(i - w) && op(i + w);
         if (skinLike(h, s, l)) c = Cls.Skin;
